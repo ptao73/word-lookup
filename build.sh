@@ -21,4 +21,12 @@ codesign --force --sign - "$APP"
 /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$APP"
 /System/Library/CoreServices/pbs -update
 
+# 5. ⌃⌥D 由 App 自己负责,去掉"服务"上的同名快捷键,避免弹两次
+defaults write pbs NSServicesStatus -dict-add '"local.ragepatti.chaci - 查词 - lookup"' \
+  '{ enabled_context_menu = 1; enabled_services_menu = 1; presentation_modes = { ContextMenu = 1; ServicesMenu = 1; }; }'
+/System/Library/CoreServices/pbs -update
+
+# 6. 现在就在后台启动(要开机自启,另外运行 ./login-item.sh)
+open "$APP"
+
 echo "已安装: $APP"

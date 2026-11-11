@@ -4,6 +4,8 @@
 import AppKit
 import AVFoundation
 import CoreServices
+import Carbon.HIToolbox      // 全局快捷键
+import ApplicationServices  // 辅助功能权限检查
 
 // macOS 私有函数:按文件路径打开一本指定的词典(系统"词典"App 也在用)
 @_silgen_name("DCSDictionaryCreate")
@@ -136,12 +138,74 @@ final class ServiceProvider: NSObject {
     }
 }
 
+// ---------- 全局快捷键 ⌃⌥D(Google Docs 等"服务"菜单拿不到选中文字的地方也能用) ----------
+// 原理:按下快捷键 → 替你按一次 ⌘C 复制选中的词 → 从剪贴板读出来查 → 把你原来的剪贴板放回去
+// 替你按 ⌘C 需要「辅助功能」权限;没有权限时,直接查你最后复制的内容(先 ⌘C 再 ⌃⌥D)
+enum Hotkey {
+    static var ref: EventHotKeyRef?
+
+    static func register() {
+        var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
+        InstallEventHandler(GetApplicationEventTarget(), { _, _, _ in
+            DispatchQueue.main.async { Hotkey.fire() }
+            return noErr
+        }, 1, &spec, nil, nil)
+        let id = EventHotKeyID(signature: OSType(0x43484143), id: 1)   // 'CHAC'
+        RegisterEventHotKey(UInt32(kVK_ANSI_D), UInt32(controlKey | optionKey), id,
+                            GetApplicationEventTarget(), 0, &ref)
+    }
+
+    static func fire() {
+        let pb = NSPasteboard.general
+        // 没有辅助功能权限:直接查剪贴板里现有的文字
+        guard AXIsProcessTrusted() else {
+            LookupPanel.shared.show(pb.string(forType: .string) ?? "")
+            return
+        }
+        // 1. 备份原来的剪贴板
+        let saved: [[NSPasteboard.PasteboardType: Data]] = (pb.pasteboardItems ?? []).map { item in
+            var d: [NSPasteboard.PasteboardType: Data] = [:]
+            for t in item.types { if let v = item.data(forType: t) { d[t] = v } }
+            return d
+        }
+        let before = pb.changeCount
+        // 2. 等你松开 ⌃⌥(最多 1 秒),否则会变成 ⌃⌥⌘C
+        let start = Date()
+        while !NSEvent.modifierFlags.intersection([.control, .option, .shift, .command]).isEmpty,
+              Date().timeIntervalSince(start) < 1 { usleep(20_000) }
+        // 3. 替你按 ⌘C
+        let src = CGEventSource(stateID: .combinedSessionState)
+        for down in [true, false] {
+            let e = CGEvent(keyboardEventSource: src, virtualKey: CGKeyCode(kVK_ANSI_C), keyDown: down)
+            e?.flags = .maskCommand
+            e?.post(tap: .cghidEventTap)
+        }
+        // 4. 等剪贴板变化(最多 0.8 秒),读出单词,再还原剪贴板
+        func poll(_ tries: Int) {
+            if pb.changeCount != before || tries == 0 {
+                let word = pb.changeCount != before ? (pb.string(forType: .string) ?? "") : ""
+                if pb.changeCount != before {
+                    pb.clearContents()
+                    pb.writeObjects(saved.map { d -> NSPasteboardItem in
+                        let it = NSPasteboardItem(); for (t, v) in d { it.setData(v, forType: t) }; return it
+                    })
+                }
+                LookupPanel.shared.show(word.isEmpty ? "" : word)
+                return
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { poll(tries - 1) }
+        }
+        poll(16)
+    }
+}
+
 // ---------- 程序入口 ----------
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let provider = ServiceProvider()
     func applicationDidFinishLaunching(_ n: Notification) {
         NSApp.servicesProvider = provider
         NSUpdateDynamicServices()
+        Hotkey.register()
         // 方便测试:命令行 `open -a 查词 --args carbon` 也能直接查
         let args = CommandLine.arguments.dropFirst().filter { !$0.hasPrefix("-") }
         if let w = args.first { LookupPanel.shared.show(w) }
