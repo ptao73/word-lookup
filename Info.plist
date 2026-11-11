@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleIdentifier</key>        <string>local.ragepatti.chaci</string>
+	<key>CFBundleName</key>              <string>查词</string>
+	<key>CFBundleDisplayName</key>       <string>查词</string>
+	<key>CFBundleExecutable</key>        <string>chaci</string>
+	<key>CFBundlePackageType</key>       <string>APPL</string>
+	<key>CFBundleShortVersionString</key><string>1.0</string>
+	<key>CFBundleVersion</key>           <string>1</string>
+	<key>LSMinimumSystemVersion</key>    <string>13.0</string>
+	<!-- 不在 Dock 显示 -->
+	<key>LSUIElement</key>               <true/>
+	<!-- 右键 → 服务 → 查词 -->
+	<key>NSServices</key>
+	<array>
+		<dict>
+			<key>NSMenuItem</key>    <dict><key>default</key><string>查词</string></dict>
+			<key>NSMessage</key>     <string>lookup</string>
+			<key>NSPortName</key>    <string>查词</string>
+			<key>NSSendTypes</key>   <array><string>public.utf8-plain-text</string><string>NSStringPboardType</string></array>
+			<key>NSRequiredContext</key><dict/>
+		</dict>
+	</array>
+	<!-- 链接 chaci://单词 -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>    <string>chaci</string>
+			<key>CFBundleURLSchemes</key> <array><string>chaci</string></array>
+		</dict>
+	</array>
+</dict>
+</plist>
