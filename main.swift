@@ -49,7 +49,7 @@ final class LookupPanel: NSObject {
     static let shared = LookupPanel()
     private var panel: NSPanel!
     private var textView: NSTextView!
-    private var player: AVPlayer?
+    private var audio: AVAudioPlayer?
     private var word = ""
 
     private func build() {
@@ -107,11 +107,53 @@ final class LookupPanel: NSObject {
     }
 
     // 有道发音:type=1 英音,type=2 美音
+    // 不用 AVPlayer 直接播网址:Mac 睡眠后它会复用睡前的旧连接(已被 VPN/服务器断开)而静默失败。
+    // 改成:先查本地缓存 → 没有就每次用"全新连接"下载(失败重试 1 次)→ 存缓存 → 播放
     private func play(_ type: Int) {
+        let w = word, title = panel.title
+        let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("chaci-audio", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let safe = w.lowercased().map { $0.isLetter || $0.isNumber ? String($0) : "_" }.joined()
+        let file = dir.appendingPathComponent("\(safe)-\(type).mp3")
+        if let d = try? Data(contentsOf: file) { playData(d); return }
+
         var c = URLComponents(string: "https://dict.youdao.com/dictvoice")!
-        c.queryItems = [URLQueryItem(name: "audio", value: word), URLQueryItem(name: "type", value: "\(type)")]
-        player = AVPlayer(url: c.url!)
-        player?.play()
+        c.queryItems = [URLQueryItem(name: "audio", value: w), URLQueryItem(name: "type", value: "\(type)")]
+        panel.title = "\(w) — 正在下载发音…"
+        download(c.url!, triesLeft: 2) { [weak self] data in
+            guard let self else { return }
+            if let data, data.count > 500 {            // 太小说明不是真的音频
+                try? data.write(to: file)
+                self.panel.title = title
+                self.playData(data)
+            } else {
+                self.panel.title = "\(w) — 发音下载失败,请再点一次"
+            }
+        }
+    }
+
+    // 每次新建一个临时会话 = 一定是全新连接,不复用旧连接
+    private func download(_ url: URL, triesLeft: Int, done: @escaping (Data?) -> Void) {
+        let cfg = URLSessionConfiguration.ephemeral
+        cfg.timeoutIntervalForRequest = 8
+        let s = URLSession(configuration: cfg)
+        s.dataTask(with: url) { data, resp, err in
+            s.finishTasksAndInvalidate()
+            let ok = err == nil && (resp as? HTTPURLResponse)?.statusCode == 200
+            if !ok && triesLeft > 1 {
+                NSLog("chaci audio retry: %@", String(describing: err))
+                self.download(url, triesLeft: triesLeft - 1, done: done)
+                return
+            }
+            if !ok { NSLog("chaci audio failed: %@", String(describing: err)) }
+            DispatchQueue.main.async { done(ok ? data : nil) }
+        }.resume()
+    }
+
+    private func playData(_ d: Data) {
+        audio = try? AVAudioPlayer(data: d)
+        audio?.play()
     }
     @objc func playUK() { play(1) }
     @objc func playUS() { play(2) }
